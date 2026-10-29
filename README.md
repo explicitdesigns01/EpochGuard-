@@ -1,8 +1,12 @@
-# EpochGuard
+# EpochGuard: Y2038 Time-Bug Scanner
+
+*An open-source Year 2038 bug finder, by Waheed Qazeem Ayomide.*
 
 **A beginner-friendly tool that finds code which could break in the Year 2038 bug.**
 
 It reads C/C++ and SQL files, flags lines that might store time in a 32-bit "box", and explains how to fix each one.
+
+> **Not affiliated with any company or product with a similar name.** This is an independent, open-source learning project that scans source code for Year 2038 time-storage bugs. It is not a security, compliance, or risk-assurance product.
 
 > Status: early version (v1.1). It works, it has limits, and I am improving it step by step.
 
@@ -109,6 +113,22 @@ I ran EpochGuard on the source code of **BusyBox**, a real open-source project (
 
 These findings are leads for review. I have not confirmed any of them as bugs yet.
 
+### More projects (v1.1)
+
+| Project | Files scanned | HIGH | MEDIUM | INFO |
+|---|---|---|---|---|
+| BusyBox | 751 | 48 | 141 | 163 |
+| Lua | 68 | 0 | 30 | 16 |
+| zlib | 79 | 1 | 2 | 6 |
+| curl | 1078 | 45 | 219 | 152 |
+
+**What I learned from reading these results:**
+
+- **Careful projects score low.** Lua had zero HIGH findings. Its MEDIUM hits are mostly `INT_MAX` used for sizes, not time.
+- **Most of curl's HIGH hits are not dates.** Names like `idle_time_ms`, `sleeptime`, `retry_time` and `timer_calls` are durations in milliseconds or seconds, or counters. They are small numbers that do not reach the 2038 limit. Many also sit in test code and function parameters.
+- **zlib's one HIGH hit is a file-format field.** It reads a 16-bit time stored inside a ZIP header, which the ZIP format defines.
+- **So EpochGuard currently over-reports.** It is good at pointing at places to look, and not yet good at telling dates apart from durations. Fixing that is my next step.
+
 ---
 
 ## Limits (please read)
@@ -127,7 +147,8 @@ This is version 1, and I want to be honest about what it cannot do.
 ## Roadmap
 
 - [x] Test it on a real open-source C project (BusyBox) and measure the false alarms
-- [ ] Test it on more projects
+- [x] Test it on more projects (Lua, zlib, curl)
+- [ ] v1.2: skip durations (ms, sleep, retry), counters and test folders
 - [ ] Reduce false alarms and catch more hidden cases
 - [ ] Add more rules (for example, 32-bit time inside file formats and network code)
 - [ ] Add a safe-patch suggestion for the common cases
