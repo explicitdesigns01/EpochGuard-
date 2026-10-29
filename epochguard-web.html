@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EpochGuard</title>
+<style>
+:root{
+  --bg:#eef2f5; --panel:#ffffff; --ink:#12212b; --muted:#5a6b78; --line:#cfd8df;
+  --high:#b8321f; --med:#a86a00; --info:#3f6aa3; --code:#f3f6f8;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f171d; --panel:#16222b; --ink:#e6edf2; --muted:#9bacb8; --line:#2b3b47;
+    --high:#ff7a66; --med:#f0b04a; --info:#7fa8e0; --code:#0f171d;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f171d; --panel:#16222b; --ink:#e6edf2; --muted:#9bacb8; --line:#2b3b47;
+  --high:#ff7a66; --med:#f0b04a; --info:#7fa8e0; --code:#0f171d;
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:28px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{margin:0 0 18px;color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:14px}
+textarea{width:100%;min-height:220px;resize:vertical;background:var(--code);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre;overflow:auto}
+.sum{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 14px;font-weight:600}
+.chip b{font-size:18px;margin-left:6px}
+.c-high{border-color:var(--high);color:var(--high)}
+.c-med{border-color:var(--med);color:var(--med)}
+.c-info{border-color:var(--info);color:var(--info)}
+.empty{color:var(--muted);padding:16px;border:1px dashed var(--line);border-radius:10px}
+.find{background:var(--panel);border:1px solid var(--line);border-left-width:5px;border-radius:8px;padding:10px 12px;margin:10px 0}
+.find.HIGH{border-left-color:var(--high)} .find.MEDIUM{border-left-color:var(--med)} .find.INFO{border-left-color:var(--info)}
+.top{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.sev{font-size:13px}
+.HIGH .sev{color:var(--high)} .MEDIUM .sev{color:var(--med)} .INFO .sev{color:var(--info)}
+.snip{display:block;margin:6px 0;padding:6px 8px;background:var(--code);border-radius:6px;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;overflow-x:auto;white-space:pre}
+.fix{margin:0;color:var(--muted);font-size:14px}
+.note{margin-top:24px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>EpochGuard</h1>
+  <p class="sub">Paste C, C++ or SQL code. Risky Year 2038 time bugs show up as you type.</p>
+
+  <div class="bar">
+    <select id="mode" aria-label="Language">
+      <option value="c">C / C++</option>
+      <option value="sql">SQL</option>
+    </select>
+    <button id="demo" type="button">Load demo</button>
+    <button id="clear" type="button">Clear</button>
+    <label class="chk"><input id="info" type="checkbox" checked> Show INFO notes</label>
+  </div>
+
+  <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Code to scan"></textarea>
+
+  <div class="sum" id="sum"></div>
+  <div id="out"></div>
+
+  <p class="note">Everything runs in your browser. Nothing you paste is uploaded. EpochGuard matches text patterns, so treat results as leads to check, not proof of a bug.</p>
+</main>
+
+<script>
+// ---------- PART 1: PATTERNS (same rules as the Python version) ----------
+var TYPES = "(?:unsigned\\s+|signed\\s+)?(?:int|long|int32_t|uint32_t)";
+var DECL = new RegExp("\\b" + TYPES + "(?:\\s+int)?\\s+\\**\\s*([A-Za-z_]\\w*)", "g");
+var ASSIGN_TIME = new RegExp("\\b" + TYPES + "\\s+\\w+\\s*=\\s*time\\s*\\(");
+var CAST_TIME = new RegExp("\\(\\s*" + TYPES + "\\s*\\)\\s*time\\s*\\(");
+var LIMIT = /2147483647|0x7fffffff|\bINT_MAX\b|\bINT32_MAX\b/i;
+var TIME_T = /\btime_t\b/;
+var TIME_FUNCS = /\b(?:gmtime|localtime|mktime|ctime|asctime)\s*\(/;
+var SQL_TS = /\bTIMESTAMP\b/i;
+var TIME_WORDS = ["time","stamp","expire","expiry","created","modified","mtime","ctime","atime","deadline","epoch"];
+
+// ---------- PART 2: CHECK ONE LINE ----------
+function checkLine(text, mode, showInfo) {
+  var out = [];
+  if (mode === "sql") {
+    if (SQL_TS.test(text)) out.push(["MEDIUM", "SQL TIMESTAMP column",
+      "Some database versions stop at 2038. Check your version, or use DATETIME or a 64-bit column."]);
+    return out;
+  }
+  text = text.replace(/\blong\s+long\b/g, "int64_t");   // long long is 64-bit, so safe
+  var flaggedHigh = false;
+
+  var m;
+  DECL.lastIndex = 0;
+  while ((m = DECL.exec(text)) !== null) {
+    var name = m[1].toLowerCase();
+    var after = text.slice(m.index + m[0].length).replace(/^\s+/, "");
+    if (after.charAt(0) === "(") continue;                 // a function name, not a variable
+    if (name.includes("count") || name.includes("nsec")) continue;  // not second counters
+    if (name.includes("timeout")) {
+      out.push(["MEDIUM", "32-bit timeout variable",
+        "If a timeout is added to the current time, the sum can pass the 32-bit limit. Use int64_t for the result."]);
+    } else if (TIME_WORDS.some(function (w) { return name.includes(w); })) {
+      out.push(["HIGH", "32-bit variable holds time",
+        "Change the type to int64_t (or time_t on a 64-bit-time build)."]);
+      flaggedHigh = true;
+    }
+  }
+  if (!flaggedHigh && (ASSIGN_TIME.test(text) || CAST_TIME.test(text)))
+    out.push(["HIGH", "time() stored in 32 bits",
+      "time() returns a time_t. Store it in time_t or int64_t, not int or long."]);
+  if (LIMIT.test(text))
+    out.push(["MEDIUM", "32-bit limit constant",
+      "Check if this number is used for time. If yes, it is a hidden 2038 wall."]);
+  if (showInfo) {
+    if (TIME_T.test(text)) out.push(["INFO", "uses time_t",
+      "Safe on 64-bit time. On old 32-bit builds it is 32 bits. Check compile flags (_TIME_BITS=64)."]);
+    if (TIME_FUNCS.test(text)) out.push(["INFO", "calendar function",
+      "Breaks past 2038 if time_t is 32 bits. Test with dates after 2038."]);
+  }
+  return out;
+}
+
+function isComment(t, mode) {
+  return mode === "sql" ? t.startsWith("--") : /^(\/\/|\/\*|\*)/.test(t);
+}
+
+// ---------- PART 3: SCAN ALL LINES AND SHOW RESULTS ----------
+var codeEl = document.getElementById("code");
+var outEl = document.getElementById("out");
+var sumEl = document.getElementById("sum");
+var modeEl = document.getElementById("mode");
+var infoEl = document.getElementById("info");
+
+function scan() {
+  var lines = codeEl.value.split("\n");
+  var mode = modeEl.value, showInfo = infoEl.checked;
+  var found = [];
+  lines.forEach(function (raw, i) {
+    var t = raw.trim();
+    if (t === "" || isComment(t, mode)) return;
+    checkLine(t, mode, showInfo).forEach(function (f) {
+      found.push({ n: i + 1, sev: f[0], title: f[1], fix: f[2], code: t });
+    });
+  });
+  var rank = { HIGH: 0, MEDIUM: 1, INFO: 2 };
+  found.sort(function (a, b) { return rank[a.sev] - rank[b.sev] || a.n - b.n; });
+  render(found);
+}
+
+function el(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;   // textContent keeps pasted code harmless
+  return e;
+}
+
+function clearEl(e) {
+  while (e.firstChild) e.removeChild(e.firstChild);
+}
+
+function render(found) {
+  clearEl(sumEl);
+  clearEl(outEl);
+  var counts = { HIGH: 0, MEDIUM: 0, INFO: 0 };
+  found.forEach(function (f) { counts[f.sev]++; });
+  [["HIGH","c-high"],["MEDIUM","c-med"],["INFO","c-info"]].forEach(function (p) {
+    var chip = el("span", "chip " + p[1], p[0]);
+    chip.appendChild(el("b", "", String(counts[p[0]])));
+    sumEl.appendChild(chip);
+  });
+  if (!codeEl.value.trim()) {
+    outEl.appendChild(el("div", "empty", "Paste some code above, or tap Load demo."));
+    return;
+  }
+  if (!found.length) {
+    outEl.appendChild(el("div", "empty", "No 2038 risks matched. That is not proof the code is safe, only that none of the current rules fired."));
+    return;
+  }
+  found.forEach(function (f) {
+    var card = el("div", "find " + f.sev);
+    var top = el("div", "top");
+    top.appendChild(el("span", "", f.title));
+    top.appendChild(el("span", "sev", f.sev + " · line " + f.n));
+    card.appendChild(top);
+    card.appendChild(el("code", "snip", f.code));
+    card.appendChild(el("p", "fix", "Fix: " + f.fix));
+    outEl.appendChild(card);
+  });
+}
+
+// ---------- PART 4: BUTTONS AND LIVE TYPING ----------
+var DEMO_C = "#include <time.h>\nstruct session {\n    int created_at;\n    long expires;\n    long long safe_stamp;\n};\nint main() {\n    int now = time(NULL);\n    time_t t = time(NULL);\n    struct tm *p = gmtime(&t);\n    int timeout = 30;\n    int max = 2147483647;\n    // int old_timestamp = 0;\n    return 0;\n}\n";
+var DEMO_SQL = "CREATE TABLE users (\n  id INT,\n  created_at TIMESTAMP\n);\n";
+
+codeEl.addEventListener("input", scan);          // runs on every keystroke or paste
+infoEl.addEventListener("change", scan);
+modeEl.addEventListener("change", function () {
+  codeEl.value = modeEl.value === "sql" ? DEMO_SQL : DEMO_C;
+  scan();
+});
+document.getElementById("demo").addEventListener("click", function () {
+  codeEl.value = modeEl.value === "sql" ? DEMO_SQL : DEMO_C;
+  scan();
+});
+document.getElementById("clear").addEventListener("click", function () {
+  codeEl.value = ""; scan(); codeEl.focus();
+});
+
+try {
+  codeEl.value = DEMO_C;
+  scan();
+} catch (err) {
+  outEl.textContent = "EpochGuard could not start: " + err.message;
+}
+</script>
+</body>
+</html>
