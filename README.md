@@ -1,10 +1,10 @@
-# Y2038 Scanner
+# EpochGuard
 
 **A beginner-friendly tool that finds code which could break in the Year 2038 bug.**
 
 It reads C/C++ and SQL files, flags lines that might store time in a 32-bit "box", and explains how to fix each one.
 
-> Status: early version (v1). It works, it has limits, and I am improving it step by step.
+> Status: early version (v1.1). It works, it has limits, and I am improving it step by step.
 
 ---
 
@@ -51,7 +51,7 @@ It skips comment lines, and it treats `long long` as safe because it is already 
 ## Example output
 
 ```
-Y2038 SCAN REPORT
+EPOCHGUARD SCAN REPORT
 Folder: demo_project
 Files scanned: 2
 
@@ -80,12 +80,34 @@ You only need **Python 3**. There is nothing to install.
 **On a computer:**
 
 ```
-python scanner.py
+python epochguard.py
 ```
 
-**On an Android phone:** open `scanner.py` in the Pydroid 3 app and tap the play button.
+**On an Android phone:** open `epochguard.py` in the Pydroid 3 app and tap the play button.
+
+**Live web version:** open `epochguard-web.html` in any browser. Paste code and the results update as you type. Nothing is uploaded, because it all runs on your device.
 
 Press Enter at the prompt to scan the built-in demo, or type the path of a folder with real code.
+
+---
+
+## Tested on real code
+
+I ran EpochGuard on the source code of **BusyBox**, a real open-source project (751 C, header and SQL files scanned).
+
+| Version | HIGH | MEDIUM | INFO |
+|---|---|---|---|
+| v1 (first run) | 74 | 146 | 163 |
+| v1.1 (after two filters) | 48 | 141 | 163 |
+
+**What I learned from the results:**
+
+- **Some hits are worth a human look.** For example, one line casts `time(NULL)` to an `int` before writing it out. That is exactly the pattern I am hunting.
+- **Some hits are fixed by a file format, not by the programmer.** Fields like `uint32_t i_mtime` in file-system structures are defined by the format itself, so changing the type is not enough. These need a different kind of fix.
+- **My first version raised false alarms.** It flagged function names like `uptime_main` as if they were time variables. Fixing that cut the HIGH count from 74 to 48. That is why v1.1 exists.
+- **More false alarms remain.** Names such as `sleeptime` and `waittime` are durations, not dates, and many `INT_MAX` uses have nothing to do with time. Reducing these is the next step.
+
+These findings are leads for review. I have not confirmed any of them as bugs yet.
 
 ---
 
@@ -104,7 +126,8 @@ This is version 1, and I want to be honest about what it cannot do.
 
 ## Roadmap
 
-- [ ] Test it on real open-source C projects and measure the false alarms
+- [x] Test it on a real open-source C project (BusyBox) and measure the false alarms
+- [ ] Test it on more projects
 - [ ] Reduce false alarms and catch more hidden cases
 - [ ] Add more rules (for example, 32-bit time inside file formats and network code)
 - [ ] Add a safe-patch suggestion for the common cases
